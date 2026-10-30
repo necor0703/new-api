@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Filter, RotateCcw, Calendar, Search } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DateTimePicker } from '@/components/datetime-picker'
@@ -47,6 +47,7 @@ import type {
   DashboardFilters,
 } from '@/features/dashboard/types'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
+import { getUserGroups } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -110,6 +111,30 @@ export function ModelsFilter(props: ModelsFilterProps) {
   const [selectedRange, setSelectedRange] = useState<number | null>(() =>
     detectQuickRangeDays(props.currentFilters)
   )
+  const [groupOptions, setGroupOptions] = useState<string[]>([])
+  const [groupsLoading, setGroupsLoading] = useState(false)
+
+  // 打开弹窗时拉取可用分组列表（走 /api/user/self/groups，admin 能看到全部）
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setGroupsLoading(true)
+    void getUserGroups()
+      .then((res) => {
+        if (cancelled) return
+        const data = res?.data ?? {}
+        setGroupOptions(Object.keys(data).sort())
+      })
+      .catch(() => {
+        if (!cancelled) setGroupOptions([])
+      })
+      .finally(() => {
+        if (!cancelled) setGroupsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   const handleOpenChange = (nextOpen: boolean) => {
     // Sync the editing state from the applied filters every time the dialog
@@ -152,6 +177,13 @@ export function ModelsFilter(props: ModelsFilterProps) {
     setFilters((prev) => ({ ...prev, [field]: value }))
     if (field === 'start_timestamp' || field === 'end_timestamp')
       setSelectedRange(null)
+  }
+
+  const handleGroupChange = (value: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      group: value === '__all__' ? '' : value,
+    }))
   }
 
   const handleQuickRange = (days: number) => {
@@ -299,6 +331,41 @@ export function ModelsFilter(props: ModelsFilterProps) {
               </div>
             </>
           )}
+
+          <SectionDivider label={t('Group Filter')} />
+
+          <div className='grid gap-2'>
+            <Label htmlFor='group'>{t('Group')}</Label>
+            <Select
+              items={[
+                { value: '__all__', label: t('All Groups') },
+                ...groupOptions.map((g) => ({ value: g, label: g })),
+              ]}
+              value={filters.group || '__all__'}
+              onValueChange={handleGroupChange}
+              disabled={groupsLoading}
+            >
+              <SelectTrigger id='group'>
+                <SelectValue
+                  placeholder={
+                    groupsLoading
+                      ? t('Loading groups...')
+                      : t('Select group')
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  <SelectItem value='__all__'>{t('All Groups')}</SelectItem>
+                  {groupOptions.map((g) => (
+                    <SelectItem key={g} value={g}>
+                      {g}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </ScrollArea>
     </Dialog>
