@@ -1,0 +1,31 @@
+services:
+  new-api:
+    # 镜像由 deploy.sh 从 git 源码本地构建后填入 .env 的 IMAGE_TAG
+    image: ${IMAGE_TAG:-new-api:prod-latest}
+    container_name: ${CONTAINER_NAME:-new-api-prod}
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    environment:
+      - SQL_DSN=${SQL_DSN}
+      - LOG_SQL_DSN=${LOG_SQL_DSN}
+      - REDIS_CONN_STRING=${REDIS_CONN_STRING}
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+      - BATCH_UPDATE_ENABLED=true
+      - NODE_NAME=${NODE_NAME:-new-api-prod-node-1}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SYNC_FREQUENCY=60
+      - CHANNEL_UPDATE_FREQUENCY=30
+    extra_hosts:
+      # 让容器经宿主机网关访问本机 PG/Redis（host 模式必需，bundled 模式无害）
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\\\"success\\\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
