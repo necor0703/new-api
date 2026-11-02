@@ -309,6 +309,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 			AutoBan: &autoBanInt,
 		}
 		service.RequestPolicy(c).BeginAttempt(channel, info.UsingGroup)
+		if info.UsingGroup != "" {
+			c.Header("X-Using-Group", info.UsingGroup)
+		}
 		return channel, nil
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
@@ -320,6 +323,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+	if info.UsingGroup != "" {
+		c.Header("X-Using-Group", info.UsingGroup)
+	}
 
 	service.RequestPolicy(c).BeginAttempt(channel, selectGroup)
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
