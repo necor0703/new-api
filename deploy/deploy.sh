@@ -18,7 +18,7 @@ set -a; source "$ENV_FILE"; set +a
 : "${IMAGE_TAG:=new-api:prod-latest}"
 : "${CONTAINER_NAME:=new-api-prod}"
 : "${APP_PORT:=3000}"
-: "${MW_MODE:=host}"
+: "${MW_MODE:=bundled}"
 : "${PG_DB:=newapi}"
 : "${PG_LOG_DB:=newapi_log}"
 : "${PG_USER:=newapi}"

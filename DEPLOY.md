@@ -5,7 +5,7 @@
 
 ---
 
-## 0. 一键生产部署（新机器看这节就够）
+## 0. 一键生产部署（新机器看这节就够，默认 bundled；详细步骤见 DEPLOY-NEW-SERVER.md）
 
 ```bash
 # 1) 拉仓库（仓库里自带 deploy/）
@@ -14,9 +14,10 @@ cd /root/newapi-src-prod
 
 # 2) 准备配置（只改这一份）
 cp deploy/.env.example /app/new-api-prod/.env
-vim /app/new-api-prod/.env   # 必改：GIT_REF / APP_PORT / MW_MODE / 密码类
+vim /app/new-api-prod/.env   # 必改：APP_PORT / 密码类；MW_MODE 默认 bundled（空机直接用）
+                             # bundled 只填 POSTGRES_PASSWORD / REDIS_PASSWORD_BUNDLED（留空=脚本随机生成）
 
-# 3) 一键部署（git拉码→docker构建→装/复用PG+Redis→compose起服→健康检查）
+# 3) 一键部署（git拉码→docker构建→起 pg+redis 容器→compose起服→健康检查）
 ./deploy/deploy.sh /app/new-api-prod/.env
 ```
 
@@ -34,8 +35,8 @@ curl -X POST http://127.0.0.1:<端口>/api/setup \
 |---|---|
 | `GIT_REPO` / `GIT_REF` | 源码地址与版本；生产建议 pin 一个 commit 或 tag，而不是 main |
 | `APP_PORT` | 对外端口，默认 3000 |
-| `MW_MODE=host` | 复用本机已有 PG/Redis（默认）。没有就 apt 装，有就直接用；自动建账号建库、放行容器网段、密码随机生成写回 `.env` |
-| `MW_MODE=bundled` | 全新空机用：compose 顺手起 `postgres:15` + `redis:7-alpine` 两个容器，数据落 `pg_data` / `redis_data` 卷 |
+| `MW_MODE=bundled` | 默认。全新空机用：compose 顺手起 `postgres:15` + `redis:7-alpine` 两个容器，数据落 `pg_data` / `redis_data` 卷 |
+| `MW_MODE=host` | 复用本机已有 PG/Redis。没有就 apt 装，有就直接用；自动建账号建库、放行容器网段、密码随机生成写回 `.env` |
 | `PG_DB` / `PG_LOG_DB` / `PG_USER` | host 模式下的业务库 / 日志库 / 账号（脚本自动创建，默认 newapi / newapi_log / newapi） |
 | `REDIS_PASSWORD` / `REDIS_DB` | host 模式本机 Redis 密码与库号（避免和别的业务串库） |
 | `POSTGRES_PASSWORD` / `REDIS_PASSWORD_BUNDLED` | bundled 模式两容器的密码，空则脚本随机生成写回 `.env` |
