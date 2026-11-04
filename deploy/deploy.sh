@@ -231,8 +231,8 @@ docker compose --env-file "$ENV_FILE" $COMPOSE_FILES up -d
 log "等待健康检查…"
 for i in $(seq 1 30); do
   if curl -sf "http://127.0.0.1:${APP_PORT}/api/status" | grep -q '"success": *true'; then
-    log "部署成功: http://$(hostname -I | awk '{print $1}'):3000 (源码 $SHORT_SHA)"
-    echo "首次使用请初始化管理员: curl -X POST http://127.0.0.1:${APP_PORT}/api/user/setup -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"<密码>\",\"confirmPassword\":\"<密码>\"}'"
+    log "部署成功: http://$(hostname -I | awk '{print $1}'):${APP_PORT} (源码 $SHORT_SHA)"
+    echo "首次使用请初始化管理员: curl -X POST http://127.0.0.1:${APP_PORT}/api/setup -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"<密码>\",\"confirmPassword\":\"<密码>\"}'"
     exit 0
   fi
   sleep 5

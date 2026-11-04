@@ -1,6 +1,6 @@
 # New-API 源码生产部署文档（necor0703 fork）
 
-> 源码：https://github.com/necor0703/new-api.git（含模型分析页 group 筛选二开）
+> 源码：https://github.com/necor0703/new-api.git @ 29e7401（含 group 筛选 + X-Using-Group 二开）
 > 部署包位置（仓库内）：`deploy/` —— 一键脚本 + 两套 compose + 配置模板
 
 ---
@@ -23,7 +23,7 @@ vim /app/new-api-prod/.env   # 必改：GIT_REF / APP_PORT / MW_MODE / 密码类
 脚本做完后会打印访问地址；首次使用需初始化管理员：
 
 ```bash
-curl -X POST http://127.0.0.1:<端口>/api/user/setup \
+curl -X POST http://127.0.0.1:<端口>/api/setup \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"<密码>","confirmPassword":"<密码>"}'
 ```
@@ -111,7 +111,7 @@ docker build -t new-api:src-$(git rev-parse --short HEAD) .
 cd /app/new-api-src && docker compose up -d
 # 首次启动自动 gorm AutoMigrate 建表（37 张），Redis 连上显示 "Redis is enabled"
 # 初始化管理员：
-curl -X POST http://localhost:3003/api/user/setup \
+curl -X POST http://localhost:3003/api/setup \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"xxx","confirmPassword":"xxx"}'
 ```
@@ -165,7 +165,19 @@ cd /root/newapi-src
 # 前端改动：容器内已含构建产物，无需 node 环境；后端改动需重编 Go（约 2-3 分钟）
 ```
 
-## 4. 二开记录（2026-10-30，commit 2e79958，已推 fork main）
+## 4. 二开记录
+
+### 2026-11-02，commit 29e7401（已推 fork main，本次新机默认 pin 版本）
+
+relay 透出 `X-Using-Group` 响应头（原样返回最终命中分组，CORS 放行该头），公司 Java 网关按 `X-Using-Group` 做 Baili 分账：
+- 后端：`controller/relay.go` 写入响应头 + `middleware/cors.go` 放行
+- `deploy.sh` / `DEPLOY.md` 初始化路由纠正为 `POST /api/setup`
+
+### 2026-11-01，commit 159204b
+
+新增生产一键部署包 `deploy/`（deploy.sh + host/bundled 双 compose + .env.example）。
+
+### 2026-10-30，commit 2e79958
 
 模型调用分析页新增按分组筛选（Filter 弹窗 → Group Filter → Group 下拉）：
 - 后端：`GET /api/data/`、`/api/data/self` 支持 `group` 查询参数（`controller/usedata.go` + `model/usedata.go`，空=不过滤）
