@@ -13,6 +13,8 @@ EC2 → 安全组 → Inbound 加一条 **TCP 3000 / 0.0.0.0/0**（跟下面 `AP
 whoami  # 确认是 ec2-user
 sudo dnf update -y
 sudo dnf install -y git curl ca-certificates openssl python3 nano
+hash -r
+git --version  # 有版本号才算成；若仍 command not found，先跑 hash -r 再试
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 sudo systemctl enable --now docker
@@ -33,16 +35,19 @@ docker ps
 > `systemctl enable --now docker` 是开机自启开关，别漏。
 > 下面步骤里 `sudo docker` 在免 sudo 生效后可去掉 sudo。
 
-## 2. 拉代码，改配置（只改 3 项）
+## 2. 拉代码，改配置（改 4 项）
 
 ```bash
 git clone https://github.com/necor0703/new-api.git ~/newapi-src-prod
 sudo mkdir -p /app/new-api-prod
-sudo chown ec2-user:ec2-user /app/new-api-prod
+sudo chown -R ec2-user:ec2-user /app/new-api-prod
 cp ~/newapi-src-prod/deploy/.env.example /app/new-api-prod/.env
 chmod 600 /app/new-api-prod/.env
 nano /app/new-api-prod/.env
 ```
+
+> 顺序别反：先 `chown` 再改 `.env`，否则 `sed/nano` 报 `Permission denied`。
+> 若已报 `Permission denied`，补跑 `sudo chown -R ec2-user:ec2-user /app/new-api-prod` 即可。
 
 `.env` 里改这 4 行，其余别动（第 4 行是 ec2-user 必改项，root 用户不用改）：
 
@@ -68,6 +73,16 @@ cd ~/newapi-src-prod && ./deploy/deploy.sh /app/new-api-prod/.env
 cd /app/new-api-prod && sudo docker compose -f docker-compose.bundled.yml logs --tail=100
 ```
 
+> 已部署但 redis 报 `unhealthy`（老包 bug）：补上 healthcheck 的环境变量后重建即可：
+>
+> ```bash
+> sed -i '/--requirepass/a\    environment:\n      - REDIS_PASSWORD_BUNDLED=${REDIS_PASSWORD_BUNDLED}' /app/new-api-prod/docker-compose.bundled.yml
+> grep -A2 'requirepass' /app/new-api-prod/docker-compose.bundled.yml  # 确认已插入
+> cd /app/new-api-prod && sudo docker compose -f docker-compose.bundled.yml up -d --force-recreate
+> ```
+>
+> 新 clone 的代码已自带该修复，不用再手动补。
+
 ## 4. 建管理员（只做一次）
 
 ```bash
@@ -76,7 +91,12 @@ curl -X POST http://127.0.0.1:3000/api/setup \
   -d '{"username":"admin","password":"<8位以上密码>","confirmPassword":"<8位以上密码>"}'
 ```
 
-然后浏览器打开 `http://<服务器IP>:3000`，admin 登录建渠道/用户/key。
+然后浏览器打开 `http://<服务器IP>:3000`，admin 登录建渠道/用户/key。查外网 IP：
+
+```bash
+curl -s http://169.254.169.254/latest/meta-data/public-ipv4  # AWS 元数据，最准
+curl -s https://api.ipify.org; echo                            # 无公网 IP 时看出口 IP
+```
 
 ## 5. 验证（3 条）
 
@@ -110,3 +130,7 @@ sudo docker compose -f docker-compose.bundled.yml down       # 停服（数据�
 | 换密码 | 改 `.env` 两个密码，重跑一遍 `deploy.sh` 即可 |
 | `dnf` 报 superuser privileges | 你是 ec2-user，`dnf/systemctl` 前面加 `sudo` |
 | `docker: permission denied` | 没进 docker 组：跑第 1 步的 `usermod + newgrp`，或重登 SSH |
+| `git: command not found`（但 dnf 说已安装） | bash 缓存旧 PATH：跑 `hash -r` 再试 |
+| `sed: couldn't open temporary file` / `.env Permission denied` | `/app/new-api-prod` 归属不对：`sudo chown -R ec2-user:ec2-user /app/new-api-prod` |
+| redis `unhealthy`，new-api 起不来 | 老包 bug：compose 里补 redis `environment` 后 `up -d --force-recreate`（见第 3 步） |
+| `mkdir: cannot create directory '/root'` | `.env` 里 `SRC_DIR` 还是 root 家目录：改成 `/home/ec2-user/newapi-src-prod` |
