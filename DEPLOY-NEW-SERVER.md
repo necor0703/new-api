@@ -1,69 +1,35 @@
 # new-api 新服务器部署（bundled 版）
 
-> Ubuntu 22.04/24.04 或 Amazon Linux 2023，3 个容器：`new-api` + `postgres:15` + `redis:7`。
+> 适用：Amazon Linux 2023，root 执行。3 个容器：`new-api` + `postgres:15` + `redis:7`。
 > 全程 5 步，约 15 分钟（构建占大头）。
 
 ## 0. 安全组
 
-云控制台放行 **TCP 3000**（跟下面 `APP_PORT` 一致）。
-AWS EC2：在实例的安全组 Inbound 加一条 TCP 3000 / 0.0.0.0/0。
+EC2 → 安全组 → Inbound 加一条 **TCP 3000 / 0.0.0.0/0**（跟下面 `APP_PORT` 一致）。
 
-## 1. 装 Docker（二选一）
-
-### A. Ubuntu（root 执行）
+## 1. 装 Docker
 
 ```bash
-apt-get update && apt-get install -y git curl ca-certificates openssl python3 sudo
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+whoami  # 确认是 root
+dnf update -y
+dnf install -y git curl ca-certificates openssl python3 nano
+curl -fsSL https://get.docker.com -o get-docker.sh
+sh get-docker.sh
 systemctl enable --now docker
+systemctl is-active docker
+docker --version
 docker compose version
 ```
 
-### B. Amazon Linux 2023（ec2-user 执行，全程加 sudo）
-
-```bash
-sudo dnf update -y
-sudo dnf install -y git curl ca-certificates openssl python3 nano
-sudo dnf install -y docker
-sudo systemctl enable --now docker
-sudo systemctl is-active docker
-```
-
-补 compose 插件（AL2023 自带 docker 一般没有）：
-
-```bash
-sudo docker compose version || echo "NEED_COMPOSE_PLUGIN"
-# 若提示 'compose' is not a docker command，才跑下面 4 行：
-ARCH=$(uname -m); [ "$ARCH" = "x86_64" ] && ARCH=x86_64 || ARCH=aarch64
-sudo mkdir -p /usr/local/lib/docker/cli-plugins
-sudo curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${ARCH}" -o /usr/local/lib/docker/cli-plugins/docker-compose
-sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-sudo docker compose version
-```
-
-免 sudo（跑完重登一次 SSH 生效）：
-
-```bash
-sudo usermod -aG docker ec2-user
-newgrp docker
-```
-
-> 后面步骤里把 `docker` 换成 `sudo docker` 即可（免 sudo 生效后可不加）。
-> 不确定系统？跑 `cat /etc/os-release` 看 `NAME=`，有 `dnf` 走 B，有 `apt-get` 走 A。
+> `get.docker.com` 是官方脚本，`docker-ce + compose-plugin` 一次装齐，后续 `dnf update` 跟着升级。
+> `systemctl enable --now docker` 是开机自启开关，别漏。
 
 ## 2. 拉代码，改配置（只改 3 项）
 
 ```bash
-# root：git clone https://github.com/necor0703/new-api.git /root/newapi-src-prod
-# ec2-user：
-git clone https://github.com/necor0703/new-api.git ~/newapi-src-prod
-sudo mkdir -p /app/new-api-prod
-sudo chown $(whoami):$(whoami) /app/new-api-prod
-cp ~/newapi-src-prod/deploy/.env.example /app/new-api-prod/.env
-# root 用户把上面 ~ 换成 /root 即可
+git clone https://github.com/necor0703/new-api.git /root/newapi-src-prod
+mkdir -p /app/new-api-prod
+cp /root/newapi-src-prod/deploy/.env.example /app/new-api-prod/.env
 chmod 600 /app/new-api-prod/.env
 nano /app/new-api-prod/.env
 ```
@@ -81,15 +47,13 @@ REDIS_PASSWORD_BUNDLED=Rs2026_NewApi_02
 ## 3. 一键部署
 
 ```bash
-cd ~/newapi-src-prod && ./deploy/deploy.sh /app/new-api-prod/.env
-# root 用户：cd /root/newapi-src-prod && ./deploy/deploy.sh /app/new-api-prod/.env
+cd /root/newapi-src-prod && ./deploy/deploy.sh /app/new-api-prod/.env
 ```
 
 成功会打印 `部署成功: http://<IP>:3000`。失败就看日志：
 
 ```bash
-cd /app/new-api-prod && sudo docker compose -f docker-compose.bundled.yml logs --tail=100
-# root 用户不用 sudo
+cd /app/new-api-prod && docker compose -f docker-compose.bundled.yml logs --tail=100
 ```
 
 ## 4. 建管理员（只做一次）
@@ -106,8 +70,9 @@ curl -X POST http://127.0.0.1:3000/api/setup \
 
 ```bash
 curl -s http://127.0.0.1:3000/api/status | grep -o '"success": *true'
-sudo docker inspect --format '{{.Name}} {{.State.Health.Status}}' new-api-prod new-api-prod-postgres new-api-prod-redis
-# 三个都是 healthy 才算过（root 用户去掉 sudo）
+docker inspect --format '{{.Name}} {{.State.Health.Status}}' new-api-prod new-api-prod-postgres new-api-prod-redis
+systemctl is-enabled docker
+# 前两条有输出、三个 healthy、最后一条 enabled 才算过
 ```
 
 ---
@@ -116,10 +81,10 @@ sudo docker inspect --format '{{.Name}} {{.State.Health.Status}}' new-api-prod n
 
 ```bash
 cd /app/new-api-prod
-sudo docker compose -f docker-compose.bundled.yml ps          # 状态
-sudo docker compose -f docker-compose.bundled.yml logs -f     # 日志
-sudo docker compose -f docker-compose.bundled.yml restart    # 重启
-sudo docker compose -f docker-compose.bundled.yml down       # 停服（数据保留，千万别加 -v）
+docker compose -f docker-compose.bundled.yml ps          # 状态
+docker compose -f docker-compose.bundled.yml logs -f     # 日志
+docker compose -f docker-compose.bundled.yml restart    # 重启
+docker compose -f docker-compose.bundled.yml down       # 停服（数据保留，千万别加 -v）
 ```
 
 ## 附：翻车 5 条
