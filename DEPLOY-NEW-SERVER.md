@@ -44,15 +44,17 @@ chmod 600 /app/new-api-prod/.env
 nano /app/new-api-prod/.env
 ```
 
-`.env` 里只改这 3 行，其余别动：
+`.env` 里改这 4 行，其余别动（第 4 行是 ec2-user 必改项，root 用户不用改）：
 
 ```ini
 APP_PORT=3000
 POSTGRES_PASSWORD=Pg2026_NewApi_01
 REDIS_PASSWORD_BUNDLED=Rs2026_NewApi_02
+SRC_DIR=/home/ec2-user/newapi-src-prod
 ```
 
 > 密码用 16 位以上字母+数字，示例别照抄。留空也行，脚本会自动随机生成写回。
+> `SRC_DIR` 不改会报 `mkdir: cannot create directory '/root': Permission denied`，因为模板默认写的是 root 家目录。
 
 ## 3. 一键部署
 
