@@ -1,7 +1,7 @@
 # new-api 新服务器部署（bundled 版）
 
-> 适用：Amazon Linux 2023，root 执行。3 个容器：`new-api` + `postgres:15` + `redis:7`。
-> 全程 5 步，约 15 分钟（构建占大头）。
+> 适用：Amazon Linux 2023，ec2-user 执行（非 root，需要 sudo 提权）。
+> 3 个容器：`new-api` + `postgres:15` + `redis:7`。全程 5 步，约 15 分钟（构建占大头）。
 
 ## 0. 安全组
 
@@ -10,26 +10,36 @@ EC2 → 安全组 → Inbound 加一条 **TCP 3000 / 0.0.0.0/0**（跟下面 `AP
 ## 1. 装 Docker
 
 ```bash
-whoami  # 确认是 root
-dnf update -y
-dnf install -y git curl ca-certificates openssl python3 nano
+whoami  # 确认是 ec2-user
+sudo dnf update -y
+sudo dnf install -y git curl ca-certificates openssl python3 nano
 curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
-systemctl enable --now docker
-systemctl is-active docker
-docker --version
-docker compose version
+sudo sh get-docker.sh
+sudo systemctl enable --now docker
+sudo systemctl is-active docker
+sudo docker --version
+sudo docker compose version
 ```
 
-> `get.docker.com` 是官方脚本，`docker-ce + compose-plugin` 一次装齐，后续 `dnf update` 跟着升级。
+免 sudo（跑完重登一次 SSH 生效，之后 docker 命令可不加 sudo）：
+
+```bash
+sudo usermod -aG docker ec2-user
+newgrp docker
+docker ps
+```
+
+> `get.docker.com` 是官方脚本，`docker-ce + compose-plugin` 一次装齐。
 > `systemctl enable --now docker` 是开机自启开关，别漏。
+> 下面步骤里 `sudo docker` 在免 sudo 生效后可去掉 sudo。
 
 ## 2. 拉代码，改配置（只改 3 项）
 
 ```bash
-git clone https://github.com/necor0703/new-api.git /root/newapi-src-prod
-mkdir -p /app/new-api-prod
-cp /root/newapi-src-prod/deploy/.env.example /app/new-api-prod/.env
+git clone https://github.com/necor0703/new-api.git ~/newapi-src-prod
+sudo mkdir -p /app/new-api-prod
+sudo chown ec2-user:ec2-user /app/new-api-prod
+cp ~/newapi-src-prod/deploy/.env.example /app/new-api-prod/.env
 chmod 600 /app/new-api-prod/.env
 nano /app/new-api-prod/.env
 ```
@@ -47,13 +57,13 @@ REDIS_PASSWORD_BUNDLED=Rs2026_NewApi_02
 ## 3. 一键部署
 
 ```bash
-cd /root/newapi-src-prod && ./deploy/deploy.sh /app/new-api-prod/.env
+cd ~/newapi-src-prod && ./deploy/deploy.sh /app/new-api-prod/.env
 ```
 
 成功会打印 `部署成功: http://<IP>:3000`。失败就看日志：
 
 ```bash
-cd /app/new-api-prod && docker compose -f docker-compose.bundled.yml logs --tail=100
+cd /app/new-api-prod && sudo docker compose -f docker-compose.bundled.yml logs --tail=100
 ```
 
 ## 4. 建管理员（只做一次）
@@ -70,8 +80,8 @@ curl -X POST http://127.0.0.1:3000/api/setup \
 
 ```bash
 curl -s http://127.0.0.1:3000/api/status | grep -o '"success": *true'
-docker inspect --format '{{.Name}} {{.State.Health.Status}}' new-api-prod new-api-prod-postgres new-api-prod-redis
-systemctl is-enabled docker
+sudo docker inspect --format '{{.Name}} {{.State.Health.Status}}' new-api-prod new-api-prod-postgres new-api-prod-redis
+sudo systemctl is-enabled docker
 # 前两条有输出、三个 healthy、最后一条 enabled 才算过
 ```
 
@@ -81,10 +91,10 @@ systemctl is-enabled docker
 
 ```bash
 cd /app/new-api-prod
-docker compose -f docker-compose.bundled.yml ps          # 状态
-docker compose -f docker-compose.bundled.yml logs -f     # 日志
-docker compose -f docker-compose.bundled.yml restart    # 重启
-docker compose -f docker-compose.bundled.yml down       # 停服（数据保留，千万别加 -v）
+sudo docker compose -f docker-compose.bundled.yml ps          # 状态
+sudo docker compose -f docker-compose.bundled.yml logs -f     # 日志
+sudo docker compose -f docker-compose.bundled.yml restart    # 重启
+sudo docker compose -f docker-compose.bundled.yml down       # 停服（数据保留，千万别加 -v）
 ```
 
 ## 附：翻车 5 条
@@ -96,3 +106,5 @@ docker compose -f docker-compose.bundled.yml down       # 停服（数据保留�
 | redis `NOAUTH` | 改完密码没重建：`up -d --force-recreate` |
 | `down -v` 后数据没了 | `-v` 会删卷，只能从备份恢复；以后只用 `down` |
 | 换密码 | 改 `.env` 两个密码，重跑一遍 `deploy.sh` 即可 |
+| `dnf` 报 superuser privileges | 你是 ec2-user，`dnf/systemctl` 前面加 `sudo` |
+| `docker: permission denied` | 没进 docker 组：跑第 1 步的 `usermod + newgrp`，或重登 SSH |
