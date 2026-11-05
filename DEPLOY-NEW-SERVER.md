@@ -119,6 +119,21 @@ sudo docker compose -f docker-compose.bundled.yml restart    # 重启
 sudo docker compose -f docker-compose.bundled.yml down       # 停服（数据保留，千万别加 -v）
 ```
 
+## 附：版本更新（代码发布）
+
+代码有更新（fork main 已有新提交）时，一条命令完成拉代码→重新打包→发布：
+
+```bash
+cd ~/newapi-src-prod && ./deploy/deploy.sh /app/new-api-prod/.env
+```
+
+脚本幂等，重复执行安全：
+
+- 自动 `git pull` main → `docker build new-api:prod-latest` → `compose up -d`（镜像变了才重建容器）
+- `.env` 已有密码/密钥不重新生成，PG 数据卷不动，用户/渠道/日志全保留
+- 成功标志：`部署成功: http://<IP>:3000 (源码 <commit短哈希>)`，哈希可对上刚推的 commit
+- 验证：`curl -s http://127.0.0.1:3000/api/status | grep -o '"success": *true'`，顺手 `docker image prune -f` 清旧镜像层
+
 ## 附：翻车 5 条
 
 | 现象 | 修法 |
