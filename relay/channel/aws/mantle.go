@@ -262,6 +262,14 @@ func (a *Adaptor) newMantleOpenaiRequest(c *gin.Context, info *relaycommon.Relay
 	// Some clients attach provider-specific extras (e.g. enable_thinking)
 	// that the OpenAI-compatible endpoint rejects as unknown parameters.
 	delete(payload, "enable_thinking")
+	// GPT-5.x models reject `max_tokens`; the Chat Completions surface wants
+	// `max_completion_tokens` instead. Translate unless already set.
+	if mt, exists := payload["max_tokens"]; exists {
+		if _, has := payload["max_completion_tokens"]; !has {
+			payload["max_completion_tokens"] = mt
+		}
+		delete(payload, "max_tokens")
+	}
 	body, err := common.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal AWS Mantle request: %w", err)
