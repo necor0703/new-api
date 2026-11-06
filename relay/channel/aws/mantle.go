@@ -270,6 +270,16 @@ func (a *Adaptor) newMantleOpenaiRequest(c *gin.Context, info *relaycommon.Relay
 		}
 		delete(payload, "max_tokens")
 	}
+	// The Chat Completions surface rejects function tools combined with a
+	// non-none reasoning_effort (Responses API is the documented way to get
+	// both). Normalize to 'none' so Anthropic tool-use clients don't 400.
+	if info.RelayMode != constant.RelayModeResponses && info.RelayMode != constant.RelayModeResponsesCompact {
+		if _, hasTools := payload["tools"]; hasTools {
+			if effort, has := payload["reasoning_effort"]; has && string(effort) != "none" {
+				payload["reasoning_effort"] = json.RawMessage(`"none"`)
+			}
+		}
+	}
 	body, err := common.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal AWS Mantle request: %w", err)
