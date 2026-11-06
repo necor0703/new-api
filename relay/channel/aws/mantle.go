@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/gin-gonic/gin"
@@ -76,15 +77,34 @@ func mantleRequestURL(info *relaycommon.RelayInfo) (string, error) {
 }
 
 const mantleOpenaiChatCompletionsPath = "/openai/v1/chat/completions"
+const mantleOpenaiResponsesPath = "/openai/v1/responses"
 
-// mantleOpenaiRequestURL resolves the Bedrock OpenAI-compatible Chat
-// Completions endpoint for the channel's Mantle base URL.
+// mantleOpenaiRequestURL resolves the Bedrock OpenAI-compatible endpoint for
+// the channel's Mantle base URL. It routes to the Responses API when the relay
+// runs in that mode (clients like Codex/Zcode), otherwise Chat Completions.
 func mantleOpenaiRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	target, err := resolveMantleTarget(info)
 	if err != nil {
 		return "", err
 	}
 	endpoint := target.endpoint
+	// Responses API (including compact) shares the same /openai prefix.
+	if info.RelayMode == constant.RelayModeResponses || info.RelayMode == constant.RelayModeResponsesCompact {
+		switch {
+		case strings.HasSuffix(endpoint.Path, mantleOpenaiResponsesPath):
+		case strings.HasSuffix(endpoint.Path, mantleOpenaiResponsesPath+"/compact"):
+		case strings.HasSuffix(endpoint.Path, "/openai/v1"):
+			endpoint.Path += "/responses"
+		case strings.HasSuffix(endpoint.Path, "/openai"):
+			endpoint.Path += "/v1/responses"
+		default:
+			endpoint.Path += mantleOpenaiResponsesPath
+		}
+		if info.RelayMode == constant.RelayModeResponsesCompact {
+			endpoint.Path += "/compact"
+		}
+		return endpoint.String(), nil
+	}
 	switch {
 	case strings.HasSuffix(endpoint.Path, mantleOpenaiChatCompletionsPath):
 	case strings.HasSuffix(endpoint.Path, "/openai/v1"):
@@ -239,6 +259,9 @@ func (a *Adaptor) newMantleOpenaiRequest(c *gin.Context, info *relaycommon.Relay
 	// could be rejected upstream; mirror the Messages path's cleanup.
 	delete(payload, "anthropic_version")
 	delete(payload, "anthropic_beta")
+	// Some clients attach provider-specific extras (e.g. enable_thinking)
+	// that the OpenAI-compatible endpoint rejects as unknown parameters.
+	delete(payload, "enable_thinking")
 	body, err := common.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal AWS Mantle request: %w", err)

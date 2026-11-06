@@ -40,6 +40,16 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) (any, error) {
+	// The Bedrock OpenAI-compatible endpoint only speaks OpenAI formats;
+	// translate Anthropic Messages requests before forwarding.
+	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantleOpenai {
+		openaiReq, err := service.ClaudeToOpenAIRequest(*request, info)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to convert claude request to openai request")
+		}
+		openaiReq.Model = info.UpstreamModelName
+		return openaiReq, nil
+	}
 	claudeAdaptor := claude.Adaptor{}
 	if _, err := claudeAdaptor.ConvertClaudeRequest(c, info, request); err != nil {
 		return nil, err
@@ -163,8 +173,19 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 }
 
 func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.OpenAIResponsesRequest) (any, error) {
-	// TODO implement me
-	return nil, errors.New("not implemented")
+	// The Bedrock OpenAI-compatible endpoint supports the Responses API;
+	// reuse the standard OpenAI adaptor conversion (reasoning effort etc.)
+	// and pass the request through.
+	openaiAdaptor := openai.Adaptor{}
+	converted, err := openaiAdaptor.ConvertOpenAIResponsesRequest(c, info, request)
+	if err != nil {
+		return nil, err
+	}
+	if req, ok := converted.(dto.OpenAIResponsesRequest); ok {
+		req.Model = info.UpstreamModelName
+		return req, nil
+	}
+	return converted, nil
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
