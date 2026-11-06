@@ -1088,3 +1088,49 @@ func TestConvertOpenAIRequestPassthroughOnMantleOpenai(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "openai.gpt-5.6-sol", converted.Model)
 }
+
+func TestStripEmptyThinkingBlocks(t *testing.T) {
+	var request dto.ClaudeRequest
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"model":"claude-sonnet-4-6","max_tokens":5000,
+		"messages":[
+			{"role":"user","content":"hi"},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"","signature":""},
+				{"type":"text","text":"keep me"}
+			]},
+			{"role":"user","content":"continue"},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"real reasoning","signature":"real-sig"},
+				{"type":"tool_use","id":"t1","name":"Read","input":{}}
+			]},
+			{"role":"assistant","content":[{"type":"text","text":"plain"}]},
+			{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":""}]}
+		]}`, &request))
+
+	stripEmptyThinkingBlocks(&request)
+	require.Len(t, request.Messages, 6)
+
+	// messages[1]: empty shell dropped, sibling text survives
+	first, ok := request.Messages[1].Content.([]any)
+	require.True(t, ok)
+	require.Len(t, first, 1)
+	assert.Equal(t, "text", first[0].(map[string]any)["type"])
+
+	// messages[3]: full thinking block untouched (same content list)
+	sdk := request.Messages[3].Content.([]any)
+	require.Len(t, sdk, 2)
+	assert.Equal(t, "thinking", sdk[0].(map[string]any)["type"])
+	assert.Equal(t, "real reasoning", sdk[0].(map[string]any)["thinking"])
+	assert.Equal(t, "real-sig", sdk[0].(map[string]any)["signature"])
+	assert.Equal(t, "tool_use", sdk[1].(map[string]any)["type"])
+
+	// messages[4]: no thinking blocks -> untouched
+	assert.Equal(t, "plain", request.Messages[4].GetStringContent())
+
+	// messages[5]: only an empty shell -> kept as-is (would otherwise become empty)
+	last, ok := request.Messages[5].Content.([]any)
+	require.True(t, ok)
+	require.Len(t, last, 1)
+	assert.Equal(t, "thinking", last[0].(map[string]any)["type"])
+}

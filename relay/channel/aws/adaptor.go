@@ -50,6 +50,11 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		openaiReq.Model = info.UpstreamModelName
 		return openaiReq, nil
 	}
+	// Strip empty-shell thinking blocks that some clients (e.g. ZCode)
+	// replay in assistant history: {"type":"thinking","thinking":"","signature":""}.
+	// Bedrock rejects those with "each thinking block must contain thinking";
+	// full thinking blocks and redacted_thinking blocks are left untouched.
+	stripEmptyThinkingBlocks(request)
 	claudeAdaptor := claude.Adaptor{}
 	if _, err := claudeAdaptor.ConvertClaudeRequest(c, info, request); err != nil {
 		return nil, err
@@ -88,6 +93,46 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 	}
 	return request, nil
+}
+
+// stripEmptyThinkingBlocks removes empty-shell thinking blocks that some
+// clients (e.g. ZCode) replay in assistant history:
+// {"type":"thinking","thinking":"","signature":""}.
+// Bedrock rejects those with "each thinking block must contain thinking".
+// Blocks with actual content, or with a non-empty signature, are preserved.
+// A message is only rewritten when at least one other block survives, so we
+// never emit an assistant message with empty content.
+func stripEmptyThinkingBlocks(request *dto.ClaudeRequest) {
+	for i, message := range request.Messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		blocks, ok := message.Content.([]any)
+		if !ok {
+			continue
+		}
+		kept := make([]any, 0, len(blocks))
+		dropped := false
+		for _, block := range blocks {
+			blockMap, ok := block.(map[string]any)
+			if !ok {
+				kept = append(kept, block)
+				continue
+			}
+			if blockType, _ := blockMap["type"].(string); blockType == "thinking" {
+				thinkingText, _ := blockMap["thinking"].(string)
+				signature, _ := blockMap["signature"].(string)
+				if thinkingText == "" && signature == "" {
+					dropped = true
+					continue
+				}
+			}
+			kept = append(kept, block)
+		}
+		if dropped && len(kept) > 0 {
+			request.Messages[i].Content = kept
+		}
+	}
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
