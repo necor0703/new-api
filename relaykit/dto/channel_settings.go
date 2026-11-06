@@ -105,8 +105,12 @@ const (
 type AwsApiType string
 
 const (
-	AwsApiTypeInvokeModel AwsApiType = "invoke_model"
-	AwsApiTypeMantle      AwsApiType = "mantle"
+	// AwsApiTypeMantleOpenai routes to the Bedrock OpenAI-compatible endpoint
+	// (/openai/v1/chat/completions) with SigV4 signing. Supports OpenAI-hosted
+	// models (e.g. openai.gpt-5.6-sol) which reject Anthropic Messages payloads.
+	AwsApiTypeInvokeModel  AwsApiType = "invoke_model"
+	AwsApiTypeMantle       AwsApiType = "mantle"
+	AwsApiTypeMantleOpenai AwsApiType = "mantle_openai"
 )
 
 type ChannelOtherSettings struct {

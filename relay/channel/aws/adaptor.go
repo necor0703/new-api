@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/claude"
+	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -93,6 +94,9 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantleOpenai {
+		return mantleOpenaiRequestURL(info)
+	}
 	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantle {
 		return mantleRequestURL(info)
 	}
@@ -127,6 +131,13 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		novaReq := convertToNovaRequest(request)
 		a.IsNova = true
 		return novaReq, nil
+	}
+
+	// Bedrock OpenAI-compatible endpoint speaks Chat Completions natively;
+	// passthrough the OpenAI request instead of converting to Claude format.
+	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantleOpenai {
+		request.Model = info.UpstreamModelName
+		return request, nil
 	}
 
 	// 原有的Claude模型处理逻辑
@@ -168,6 +179,16 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 			return nil, newAwsInvokeError(c.Request.Context(), err, "Mantle Messages")
 		}
 		return resp, nil
+	case dto.AwsApiTypeMantleOpenai:
+		req, err := a.newMantleOpenaiRequest(c, info, requestBody)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := channel.DoRequest(c, req, info)
+		if err != nil {
+			return nil, newAwsInvokeError(c.Request.Context(), err, "Mantle Chat Completions")
+		}
+		return resp, nil
 	case "", dto.AwsApiTypeInvokeModel:
 		// Unconfigured channels retain the existing InvokeModel behavior.
 	default:
@@ -181,6 +202,11 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	// Bedrock OpenAI-compatible endpoint returns OpenAI-format responses.
+	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantleOpenai {
+		openaiAdaptor := openai.Adaptor{}
+		return openaiAdaptor.DoResponse(c, resp, info)
+	}
 	if info.ChannelOtherSettings.AwsApiType == dto.AwsApiTypeMantle || a.ClientMode == ClientModeApiKey {
 		claudeAdaptor := claude.Adaptor{}
 		usage, err = claudeAdaptor.DoResponse(c, resp, info)

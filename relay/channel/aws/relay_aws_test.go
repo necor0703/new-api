@@ -991,3 +991,100 @@ func TestMantleCanceledRequestSkipsRetry(t *testing.T) {
 	require.ErrorAs(t, err, &apiError)
 	assert.True(t, relaytypes.IsSkipRetryError(apiError))
 }
+
+func newMantleOpenaiTestInfo() *relaycommon.RelayInfo {
+	info := newAwsTestRelayInfo()
+	info.IsStream = false
+	info.RelayFormat = relaytypes.RelayFormatOpenAI
+	info.UpstreamModelName = "openai.gpt-5.6-sol"
+	info.ApiKey = "access-key|secret-key|us-east-1"
+	info.ChannelOtherSettings.AwsApiType = dto.AwsApiTypeMantleOpenai
+	return info
+}
+
+func TestMantleOpenaiRequestPassthroughAndSigV4(t *testing.T) {
+	for _, key := range []string{"test-api-key|us-east-1", "access-key|secret-key|us-east-1"} {
+		t.Run(strings.Split(key, "|")[0], func(t *testing.T) {
+			info := newMantleOpenaiTestInfo()
+			info.ApiKey = key
+			info.UseRuntimeHeadersOverride = true
+			info.RuntimeHeadersOverride = map[string]any{"X-Test": "override"}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c := newAwsTestContext(httptest.NewRecorder(), ctx)
+			c.Request.Header.Set("Authorization", "Bearer client-secret")
+			c.Request.Header.Set("x-api-key", "client-secret")
+			a := &Adaptor{}
+			body := `{"model":"client-alias","messages":[{"role":"user","content":"hello"}],"stream":true,"future_option":{"enabled":false},"anthropic_version":"bedrock-2023-05-31"}`
+			req, err := a.newMantleOpenaiRequest(c, info, strings.NewReader(body))
+			require.NoError(t, err)
+			assert.Equal(t, "/openai/v1/chat/completions", req.URL.Path)
+			assert.Equal(t, http.MethodPost, req.Method)
+			assert.Empty(t, req.Header.Get("anthropic-version"))
+			assert.Equal(t, "override", req.Header.Get("X-Test"))
+			payload, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			var data map[string]json.RawMessage
+			require.NoError(t, common.Unmarshal(payload, &data))
+			assert.JSONEq(t, `"openai.gpt-5.6-sol"`, string(data["model"]))
+			assert.JSONEq(t, `[{"role":"user","content":"hello"}]`, string(data["messages"]))
+			assert.JSONEq(t, `{"enabled":false}`, string(data["future_option"]))
+			assert.NotContains(t, data, "anthropic_version")
+			replay, err := req.GetBody()
+			require.NoError(t, err)
+			defer replay.Close()
+			replayed, err := io.ReadAll(replay)
+			require.NoError(t, err)
+			assert.Equal(t, payload, replayed)
+			if strings.HasPrefix(key, "access-key|") {
+				auth := req.Header.Get("Authorization")
+				assert.Contains(t, auth, "/us-east-1/bedrock-mantle/aws4_request")
+				assert.NotContains(t, auth, "secret-key")
+			} else {
+				assert.Equal(t, "Bearer test-api-key", req.Header.Get("Authorization"))
+				assert.Empty(t, req.Header.Get("x-api-key"))
+			}
+			cancel()
+			assert.ErrorIs(t, req.Context().Err(), context.Canceled)
+		})
+	}
+}
+
+func TestMantleOpenaiEndpointAndCredentialValidation(t *testing.T) {
+	for _, test := range []struct {
+		name, key, base, want string
+		invalid               bool
+	}{
+		{name: "regional default", key: "key|us-west-2", want: "https://bedrock-mantle.us-west-2.api.aws/openai/v1/chat/completions"},
+		{name: "proxy root", key: "ak|sk|us-east-1", base: "https://proxy.example/gateway/", want: "https://proxy.example/gateway/openai/v1/chat/completions"},
+		{name: "openai root", key: "key|us-east-1", base: "https://proxy.example/openai/", want: "https://proxy.example/openai/v1/chat/completions"},
+		{name: "version root", key: "key|us-east-1", base: "https://proxy.example/openai/v1", want: "https://proxy.example/openai/v1/chat/completions"},
+		{name: "full endpoint", key: "key|us-east-1", base: "https://proxy.example/openai/v1/chat/completions", want: "https://proxy.example/openai/v1/chat/completions"},
+		{name: "missing region", key: "secret", invalid: true},
+		{name: "injected host", key: "key|us-east-1.evil.example/", invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			info := newMantleOpenaiTestInfo()
+			info.ApiKey, info.ChannelBaseUrl = test.key, test.base
+			endpoint, err := (&Adaptor{}).GetRequestURL(info)
+			if test.invalid {
+				require.Error(t, err)
+				assert.NotContains(t, err.Error(), "secret")
+				assert.Empty(t, endpoint)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.want, endpoint)
+		})
+	}
+}
+
+func TestConvertOpenAIRequestPassthroughOnMantleOpenai(t *testing.T) {
+	info := newMantleOpenaiTestInfo()
+	request := &dto.GeneralOpenAIRequest{Model: "client-alias", Messages: []dto.Message{{Role: "user", Content: "hello"}}}
+	result, err := (&Adaptor{}).ConvertOpenAIRequest(newAwsTestContext(httptest.NewRecorder(), context.Background()), info, request)
+	require.NoError(t, err)
+	converted, ok := result.(*dto.GeneralOpenAIRequest)
+	require.True(t, ok)
+	assert.Equal(t, "openai.gpt-5.6-sol", converted.Model)
+}

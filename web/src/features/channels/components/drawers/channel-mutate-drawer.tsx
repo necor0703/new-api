@@ -3734,6 +3734,10 @@ export function ChannelMutateDrawer({
                           value: 'mantle',
                           label: t('Mantle (Messages API)'),
                         },
+                        {
+                          value: 'mantle_openai',
+                          label: t('Mantle (OpenAI Chat Completions)'),
+                        },
                       ]}
                       onValueChange={field.onChange}
                       value={field.value ?? 'invoke_model'}
@@ -3750,6 +3754,9 @@ export function ChannelMutateDrawer({
                           </SelectItem>
                           <SelectItem value='mantle'>
                             {t('Mantle (Messages API)')}
+                          </SelectItem>
+                          <SelectItem value='mantle_openai'>
+                            {t('Mantle (OpenAI Chat Completions)')}
                           </SelectItem>
                         </SelectGroup>
                       </SelectContent>
