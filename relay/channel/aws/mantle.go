@@ -272,10 +272,11 @@ func (a *Adaptor) newMantleOpenaiRequest(c *gin.Context, info *relaycommon.Relay
 	}
 	// The Chat Completions surface rejects function tools combined with a
 	// non-none reasoning_effort (Responses API is the documented way to get
-	// both). Normalize to 'none' so Anthropic tool-use clients don't 400.
+	// both); unspecified defaults to a reasoning level, so force 'none'
+	// whenever tools are present on chat paths to avoid upstream 400s.
 	if info.RelayMode != constant.RelayModeResponses && info.RelayMode != constant.RelayModeResponsesCompact {
 		if _, hasTools := payload["tools"]; hasTools {
-			if effort, has := payload["reasoning_effort"]; has && string(effort) != "none" {
+			if effort, has := payload["reasoning_effort"]; !has || string(effort) != "none" {
 				payload["reasoning_effort"] = json.RawMessage(`"none"`)
 			}
 		}
